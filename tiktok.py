@@ -21,9 +21,7 @@ RADIUS = 50
 SPAWN_FREQUENCY = 300.0  # bile / secundă (folosit în modul continuu)
 START_ANGLE_DEG = 0.0
 
-# NOTĂ: ANGLE_STEP_DEG trebuie să dividă 360 exact pentru ca 3 rotații să fie precise.
-# Valori valide: 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 18, 20, 24, 30, 36, 40, 45, 60, 72, 90
-ANGLE_STEP_DEG = 30.0   # 30° → 12 bile per rotație completă → 36 bile per burst
+ANGLE_STEP_DEG = 32.0   # grade per bilă; 3 rotații = round(3×360/32) = 34 bile per burst
 
 LAUNCH_SPEED = 750.0
 CULL_MARGIN = 800  # px
@@ -32,13 +30,13 @@ CULL_MARGIN = 800  # px
 # SETĂRI SIMULARE AUTOMATĂ
 # ==========================================================
 
-BPM = 120.0           # Bătăi pe minut; în exact acest ritm se simulează apăsarea space
+BPM = 155.0           # Bătăi pe minut; în exact acest ritm se simulează apăsarea space
 
-BURST_COUNT = 4       # N: de câte ori se simulează apăsarea space (fiecare = 3 rotații complete)
+BURST_COUNT = 16       # N: de câte ori se simulează apăsarea space (fiecare = 3 rotații complete)
 
-CONTINUOUS_BEATS = 8  # M: câte bătăi de generare continuă după cele N burst-uri
+CONTINUOUS_BEATS = 16  # M: câte bătăi de generare continuă după cele N burst-uri
 
-SILENCE_BEATS = 4     # P: câte bătăi de liniște (fără generare) după modul continuu
+SILENCE_BEATS = 8     # P: câte bătăi de liniște (fără generare) după modul continuu
 
 # Calculat automat — 3 rotații complete exacte (3 × 360°) per burst
 BURST_ROTATIONS = 3
@@ -49,7 +47,7 @@ BALLS_PER_BURST = round(BURST_ROTATIONS * 360.0 / ANGLE_STEP_DEG)
 # VIDEO OUTPUT
 # ==========================================================
 
-RECORD_VIDEO = True
+RECORD_VIDEO = False
 OUTPUT_MP4 = "output.mp4"
 FFMPEG_PATH = "ffmpeg"  # sau r"C:\path\to\ffmpeg.exe"
 
@@ -115,7 +113,8 @@ def main():
     beat_interval = 60.0 / BPM   # secunde per bătaie
     phase = "burst"
     time_acc = 0.0               # timp acumulat în faza curentă
-    bursts_done = 0              # câte burst-uri s-au executat
+    bursts_done = 1              # primul burst pornește imediat
+    burst_balls_remaining = BALLS_PER_BURST  # bile rămase de spawnat în burst-ul curent
 
     def spawn_one():
         nonlocal angle_deg
@@ -124,11 +123,6 @@ def main():
         vy = math.sin(ang) * LAUNCH_SPEED
         balls.append(Ball(cx, cy, vx, vy, random.choice(BALL_COLORS)))
         angle_deg = (angle_deg + ANGLE_STEP_DEG) % 360.0
-
-    def do_burst():
-        """Simulează o apăsare de space: spawnează exact BALLS_PER_BURST bile (3 rotații complete)."""
-        for _ in range(BALLS_PER_BURST):
-            spawn_one()
 
     running = True
     try:
@@ -148,12 +142,23 @@ def main():
 
             if phase == "burst":
                 time_acc += frame_dt
-                # Declanșează burst la fiecare bătaie exactă (BPM precis)
+                # La fiecare bătaie exactă, declanșează un nou burst
                 while time_acc >= beat_interval and bursts_done < BURST_COUNT:
                     time_acc -= beat_interval
-                    do_burst()
                     bursts_done += 1
-                if bursts_done >= BURST_COUNT:
+                    burst_balls_remaining = BALLS_PER_BURST
+                    spawn_acc = 0.0
+                # Streamează bile la ritmul SPAWN_FREQUENCY, dar max BALLS_PER_BURST per burst
+                if burst_balls_remaining > 0:
+                    spawn_acc += SPAWN_FREQUENCY * frame_dt
+                    n = min(int(spawn_acc), burst_balls_remaining)
+                    if n:
+                        for _ in range(n):
+                            spawn_one()
+                        spawn_acc -= n
+                        burst_balls_remaining -= n
+                # Trece la faza continuă după ultimul burst
+                if bursts_done >= BURST_COUNT and burst_balls_remaining <= 0:
                     phase = "continuous"
                     time_acc = 0.0
                     spawn_acc = 0.0
