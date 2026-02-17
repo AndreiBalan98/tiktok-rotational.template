@@ -1,5 +1,4 @@
 import math
-import time
 import subprocess
 import pygame  # type: ignore
 import random
@@ -18,13 +17,36 @@ BALL_COLORS = [tuple(int(h[i:i+2], 16) for i in (0, 2, 4)) for h in BALL_COLORS_
 
 RADIUS = 50
 
-SPAWN_FREQUENCY = 300.0  # bile / secundă
+# Parametri generare bile
+SPAWN_FREQUENCY = 300.0  # bile / secundă (folosit în modul continuu)
 START_ANGLE_DEG = 0.0
-ANGLE_STEP_DEG = 32.0
+
+# NOTĂ: ANGLE_STEP_DEG trebuie să dividă 360 exact pentru ca 3 rotații să fie precise.
+# Valori valide: 1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 15, 18, 20, 24, 30, 36, 40, 45, 60, 72, 90
+ANGLE_STEP_DEG = 30.0   # 30° → 12 bile per rotație completă → 36 bile per burst
+
 LAUNCH_SPEED = 750.0
 CULL_MARGIN = 800  # px
 
-# Video output
+# ==========================================================
+# SETĂRI SIMULARE AUTOMATĂ
+# ==========================================================
+
+BPM = 120.0           # Bătăi pe minut; în exact acest ritm se simulează apăsarea space
+
+BURST_COUNT = 4       # N: de câte ori se simulează apăsarea space (fiecare = 3 rotații complete)
+
+CONTINUOUS_BEATS = 8  # M: câte bătăi de generare continuă după cele N burst-uri
+
+# Calculat automat — 3 rotații complete exacte (3 × 360°) per burst
+BURST_ROTATIONS = 3
+BALLS_PER_BURST = round(BURST_ROTATIONS * 360.0 / ANGLE_STEP_DEG)
+# Exemplu cu ANGLE_STEP_DEG=30: 3 × 360 / 30 = 36 bile per burst
+
+# ==========================================================
+# VIDEO OUTPUT
+# ==========================================================
+
 RECORD_VIDEO = True
 OUTPUT_MP4 = "output.mp4"
 FFMPEG_PATH = "ffmpeg"  # sau r"C:\path\to\ffmpeg.exe"
@@ -44,7 +66,6 @@ class Ball:
 
 
 def start_ffmpeg_recording():
-    # Primește RGB24 raw frames (CW x CH) la FPS și produce MP4 (H.264)
     cmd = [
         FFMPEG_PATH,
         "-y",
@@ -53,10 +74,10 @@ def start_ffmpeg_recording():
         "-pix_fmt", "rgb24",
         "-s", f"{CW}x{CH}",
         "-r", str(FPS),
-        "-i", "-",                # stdin
-        "-an",                    # fără audio
+        "-i", "-",
+        "-an",
         "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",    # compatibil TikTok
+        "-pix_fmt", "yuv420p",
         "-crf", "18",
         "-preset", "veryfast",
         OUTPUT_MP4,
@@ -87,16 +108,25 @@ def main():
 
     ff = start_ffmpeg_recording() if RECORD_VIDEO else None
 
+    # --- State machine simulare automată ---
+    # Faze: "burst" → "continuous" → "done"
+    beat_interval = 60.0 / BPM   # secunde per bătaie
+    phase = "burst"
+    time_acc = 0.0               # timp acumulat în faza curentă
+    bursts_done = 0              # câte burst-uri s-au executat
+
     def spawn_one():
         nonlocal angle_deg
         ang = math.radians(angle_deg)
         vx = math.cos(ang) * LAUNCH_SPEED
         vy = math.sin(ang) * LAUNCH_SPEED
         balls.append(Ball(cx, cy, vx, vy, random.choice(BALL_COLORS)))
+        angle_deg = (angle_deg + ANGLE_STEP_DEG) % 360.0
 
-        angle_deg += ANGLE_STEP_DEG
-        if abs(angle_deg) >= 360.0:
-            angle_deg = math.fmod(angle_deg, 360.0)
+    def do_burst():
+        """Simulează o apăsare de space: spawnează exact BALLS_PER_BURST bile (3 rotații complete)."""
+        for _ in range(BALLS_PER_BURST):
+            spawn_one()
 
     running = True
     try:
@@ -112,18 +142,38 @@ def main():
                     elif e.key == pygame.K_r:
                         balls.clear()
 
-            generating = pygame.key.get_pressed()[pygame.K_SPACE]
+            # --- Logica simulare automată ---
 
-            if generating:
-                spawn_acc += SPAWN_FREQUENCY * frame_dt
-                n = int(spawn_acc)
-                if n:
-                    for _ in range(n):
-                        spawn_one()
-                    spawn_acc -= n
-            else:
-                spawn_acc = 0.0
+            if phase == "burst":
+                time_acc += frame_dt
+                # Declanșează burst la fiecare bătaie exactă (BPM precis)
+                while time_acc >= beat_interval and bursts_done < BURST_COUNT:
+                    time_acc -= beat_interval
+                    do_burst()
+                    bursts_done += 1
+                if bursts_done >= BURST_COUNT:
+                    phase = "continuous"
+                    time_acc = 0.0
+                    spawn_acc = 0.0
 
+            elif phase == "continuous":
+                # Generare continuă timp de CONTINUOUS_BEATS bătăi (space ținut apăsat)
+                time_acc += frame_dt
+                continuous_duration = CONTINUOUS_BEATS * beat_interval
+                if time_acc < continuous_duration:
+                    spawn_acc += SPAWN_FREQUENCY * frame_dt
+                    n = int(spawn_acc)
+                    if n:
+                        for _ in range(n):
+                            spawn_one()
+                        spawn_acc -= n
+                else:
+                    phase = "done"
+                    spawn_acc = 0.0
+
+            # phase == "done": nu se mai generează bile
+
+            # --- Fizică bile ---
             kept = []
             for b in balls:
                 b.x += b.vx * frame_dt
@@ -132,17 +182,15 @@ def main():
                     kept.append(b)
             balls = kept
 
-            # render
+            # --- Render ---
             canvas.fill(BG_COLOR)
             for b in balls:
                 pygame.draw.circle(canvas, b.color, (int(b.x), int(b.y)), RADIUS)
 
-            # afișare (scalată)
             scaled = pygame.transform.smoothscale(canvas, screen.get_size())
             screen.blit(scaled, (0, 0))
             pygame.display.flip()
 
-            # RECORD: trimite cadrul ORIGINAL (CW x CH) către ffmpeg
             if ff and ff.stdin:
                 frame_bytes = pygame.image.tostring(canvas, "RGB")
                 ff.stdin.write(frame_bytes)
