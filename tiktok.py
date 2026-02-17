@@ -38,6 +38,8 @@ BURST_COUNT = 4       # N: de câte ori se simulează apăsarea space (fiecare =
 
 CONTINUOUS_BEATS = 8  # M: câte bătăi de generare continuă după cele N burst-uri
 
+SILENCE_BEATS = 4     # P: câte bătăi de liniște (fără generare) după modul continuu
+
 # Calculat automat — 3 rotații complete exacte (3 × 360°) per burst
 BURST_ROTATIONS = 3
 BALLS_PER_BURST = round(BURST_ROTATIONS * 360.0 / ANGLE_STEP_DEG)
@@ -109,7 +111,7 @@ def main():
     ff = start_ffmpeg_recording() if RECORD_VIDEO else None
 
     # --- State machine simulare automată ---
-    # Faze: "burst" → "continuous" → "done"
+    # Faze: "burst" → "continuous" → "silence" → "done"
     beat_interval = 60.0 / BPM   # secunde per bătaie
     phase = "burst"
     time_acc = 0.0               # timp acumulat în faza curentă
@@ -168,8 +170,15 @@ def main():
                             spawn_one()
                         spawn_acc -= n
                 else:
-                    phase = "done"
+                    phase = "silence"
+                    time_acc = 0.0
                     spawn_acc = 0.0
+
+            elif phase == "silence":
+                # Liniște: nicio generare timp de SILENCE_BEATS bătăi
+                time_acc += frame_dt
+                if time_acc >= SILENCE_BEATS * beat_interval:
+                    phase = "done"
 
             # phase == "done": nu se mai generează bile
 
