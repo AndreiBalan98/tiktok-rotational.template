@@ -32,7 +32,7 @@ CULL_MARGIN = 800  # px
 
 BPM = 155.0           # Bătăi pe minut; în exact acest ritm se simulează apăsarea space
 
-BURST_COUNT = 16       # N: de câte ori se simulează apăsarea space (fiecare = 3 rotații complete)
+BURST_COUNT = 24       # N: de câte ori se simulează apăsarea space (fiecare = 3 rotații complete)
 
 CONTINUOUS_BEATS = 16  # M: câte bătăi de generare continuă după cele N burst-uri
 
@@ -47,7 +47,7 @@ BALLS_PER_BURST = round(BURST_ROTATIONS * 360.0 / ANGLE_STEP_DEG)
 # VIDEO OUTPUT
 # ==========================================================
 
-RECORD_VIDEO = False
+RECORD_VIDEO = True
 OUTPUT_MP4 = "output.mp4"
 FFMPEG_PATH = "ffmpeg"  # sau r"C:\path\to\ffmpeg.exe"
 
